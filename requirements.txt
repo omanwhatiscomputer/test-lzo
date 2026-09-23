@@ -1,0 +1,19 @@
+# Python 3.9 (tested on 3.9.7)
+# Install torch from https://pytorch.org matching your CUDA version.
+# Blackwell GPUs (RTX 50xx, sm_120) need torch>=2.7 with CUDA 12.8:
+#   pip install torch==2.8.0 --index-url https://download.pytorch.org/whl/cu128
+# Originally tested on torch 2.1.0 nightly (cu118); runs on 2.8.0 (cu128).
+torch>=2.7
+transformers==4.28.1  # trainer code copies HF Trainer internals; newer versions may break
+accelerate==0.17.1
+datasets
+numpy<2  # torch 2.1 / transformers 4.28 were built against NumPy 1.x
+pandas
+scikit-learn
+tqdm
+filelock
+packaging
+huggingface_hub
+loralib
+loguru
+sentence-transformers  # optional: only for demo filtering in medium_models/src/dataset.py
