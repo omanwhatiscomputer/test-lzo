@@ -33,6 +33,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple, Union
 import copy
 from metrics import f1
+from rank_probe import RankProbe
 import numpy as np
 
 from tqdm.auto import tqdm
@@ -794,19 +795,47 @@ class LowRankTrainer(Trainer):
 
         # Reset model back to its parameters at start of step
         self.lowrank_zo_perturb_parameters(scaling_factor=1)
+
+        # Rank diagnostics (read-only): true gradient at the start of each interval
+        if args.rank_probe:
+            if not hasattr(self, 'rank_probe'):
+                self.rank_probe = RankProbe(args, args.rank_probe_file or os.path.join(args.output_dir, "rank_stats.csv"))
+            if self.step % args.step_interval == 0 and self.rank_probe.grad_re is not None:
+                self.rank_probe_true_grad(model, inputs)
+        self.last_loss1 = loss1
         return loss1
+
+    def rank_probe_true_grad(self, model, inputs):
+        """Backprop gradient for the probed layers only; does not touch .grad or any RNG stream."""
+        params = [(n, p) for n, p in self.named_parameters_to_optim if p.ndim >= 2 and self.rank_probe.wants_grad(n)]
+        if len(params) == 0:
+            return
+        scale = 1024.0  # guard against fp16 underflow; rank stats are scale-invariant
+        with torch.enable_grad():
+            inputs = self._prepare_inputs(inputs)
+            with self.compute_loss_context_manager():
+                loss = self.compute_loss(model, inputs)
+            grads = torch.autograd.grad(loss * scale, [p for _, p in params])
+        grads = {n: g.float() / scale for (n, _), g in zip(params, grads)}
+        self.rank_probe.grad_stats(self.step, self.step // self.args.step_interval, grads, self.v)
 
 
     def lowrank_zo_update(self):
         args = self.args
 
-        # Reset the random seed for sampling 
-        torch.manual_seed(self.zo_random_seed)     
+        # Reset the random seed for sampling
+        torch.manual_seed(self.zo_random_seed)
+
+        probe = self.rank_probe if args.rank_probe else None
+        if probe is not None:
+            probe.begin_step(self.projected_grad, self.last_loss1.item())
 
         for name, param in self.named_parameters_to_optim:
             if param.data.ndim >= 2:
                 v = self.v[name]
                 u = self.random_gaussian_matrix(m=param.data.size(0), n=args.rank_r, device=param.data.device, dtype=param.data.dtype)
+                if probe is not None:
+                    probe.accumulate(name, u)
 
                 if "bias" not in name and "layer_norm" not in name and "layernorm" not in name:
                     param.data = param.data - self._get_learning_rate() * (self.projected_grad * (u@v.t()) + args.weight_decay * param.data)
@@ -819,6 +848,9 @@ class LowRankTrainer(Trainer):
                     param.data = param.data - self._get_learning_rate() * (self.projected_grad * z + args.weight_decay * param.data)
                 else:
                     param.data = param.data - self._get_learning_rate() * (self.projected_grad * z)
+
+        if probe is not None and (self.step + 1) % args.step_interval == 0:
+            probe.end_interval(self.step, self.step // args.step_interval, self.v)
 
         self.lr_scheduler.step()
         

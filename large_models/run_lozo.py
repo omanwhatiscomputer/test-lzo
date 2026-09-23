@@ -65,6 +65,13 @@ class OurArguments(TrainingArguments):
     step_interval: int = 50 # $\nu$ in LOZO
     rank_r: int = 2 # rank r in LOZO
 
+    # Rank diagnostics (read-only instrumentation, see rank_probe.py)
+    rank_probe: bool = False # log effective-rank statistics once per lazy-sampling interval
+    rank_probe_file: str = None # CSV output path; defaults to <output_dir>/rank_stats.csv
+    rank_probe_layers: str = "" # regex over parameter names to probe; empty = all 2-D parameters
+    rank_probe_grad_layers: str = None # regex of layers for the true (backprop) gradient reference; None = off
+    rank_probe_grad_topk: int = 32 # number of full-gradient singular values to store
+
     # Prefix tuning
     prefix_tuning: bool = False # whether to use prefix tuning
     num_prefix: int = 5 # number of prefixes to use
