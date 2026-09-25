@@ -705,14 +705,17 @@ class LowRankTrainer(Trainer):
 
         torch.manual_seed(random_seed if random_seed is not None else self.zo_random_seed)
         
+        rank = self.current_rank()
+
         for name, param in self.named_parameters_to_optim:
             if param.data.ndim >= 2:
-                if step % args.step_interval == 0:
-                    v = torch.randn(param.data.size(1), args.rank_r, device=param.data.device, dtype=param.data.dtype)
+                # Resample v every step_interval steps, or when the rank schedule changes the rank
+                if step % args.step_interval == 0 or name not in self.v or self.v[name].size(1) != rank:
+                    v = torch.randn(param.data.size(1), rank, device=param.data.device, dtype=param.data.dtype)
                     self.v[name] = v
                 else:
                     v = self.v[name]
-                u = self.random_gaussian_matrix(m=param.data.size(0), n=args.rank_r, device=param.data.device, dtype=param.data.dtype)
+                u = self.random_gaussian_matrix(m=param.data.size(0), n=rank, device=param.data.device, dtype=param.data.dtype)
                 param.data = param.data + scaling_factor * (u@v.t()) * self.args.zo_eps
             else:
                 z = torch.normal(mean=0, std=1, size=param.data.size(), device=param.data.device, dtype=param.data.dtype)
@@ -806,7 +809,7 @@ class LowRankTrainer(Trainer):
         for name, param in self.named_parameters_to_optim:
             if param.data.ndim >= 2:
                 v = self.v[name]
-                u = self.random_gaussian_matrix(m=param.data.size(0), n=args.rank_r, device=param.data.device, dtype=param.data.dtype)
+                u = self.random_gaussian_matrix(m=param.data.size(0), n=v.size(1), device=param.data.device, dtype=param.data.dtype)
 
                 if "bias" not in name and "layer_norm" not in name and "layernorm" not in name:
                     param.data = param.data - self._get_learning_rate() * (self.projected_grad * (u@v.t()) + args.weight_decay * param.data)
@@ -822,6 +825,25 @@ class LowRankTrainer(Trainer):
 
         self.lr_scheduler.step()
         
+    def current_rank(self):
+        """
+        Rank r for the current step. With --rank_schedule "4:10000,2", rank is 4 for
+        steps [0, 10000) and 2 afterwards; otherwise it is --rank_r.
+        """
+        schedule = getattr(self.args, "rank_schedule", None)
+        if not schedule:
+            return self.args.rank_r
+
+        boundary = 0
+        for stage in schedule.split(","):
+            if ":" not in stage:
+                return int(stage)
+            rank, num_steps = stage.split(":")
+            boundary += int(num_steps)
+            if self.step < boundary:
+                return int(rank)
+        return int(rank)
+
     def random_gaussian_matrix(self, m, n, device, dtype, random_seed=None):
         if random_seed is not None:
             torch.manual_seed(random_seed)

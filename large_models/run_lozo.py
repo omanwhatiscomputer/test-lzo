@@ -64,6 +64,7 @@ class OurArguments(TrainingArguments):
     zo_eps: float = 1e-3 # eps in LOZO
     step_interval: int = 50 # $\nu$ in LOZO
     rank_r: int = 2 # rank r in LOZO
+    rank_schedule: str = None # e.g. "4:10000,2" = rank 4 for the first 10000 steps, then rank 2; overrides rank_r
 
     # Prefix tuning
     prefix_tuning: bool = False # whether to use prefix tuning

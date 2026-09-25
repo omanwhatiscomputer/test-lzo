@@ -22,8 +22,15 @@ LR=${LR:-1e-7}
 TASK=${TASK:-DROP}
 SEED=${SEED:-0}
 RANK=${RANK:-1}
+RANK_SCHEDULE=${RANK_SCHEDULE:-} # e.g. "4:10000,2" = rank 4 for 10000 steps, then 2; overrides RANK
 STEP_INTERVAL=${STEP_INTERVAL:-100}
 Tainer=LOZO
+
+RANK_TAG=$RANK
+if [ -n "$RANK_SCHEDULE" ]; then
+    EXTRA_ARGS="$EXTRA_ARGS --rank_schedule $RANK_SCHEDULE"
+    RANK_TAG=$(echo "$RANK_SCHEDULE" | tr ':,' 'x-') # e.g. 4x10000-2
+fi
 
 case $TASK in
     CB) # It has <1000 training examples. Only use 100 for dev
@@ -47,7 +54,7 @@ case $TASK in
         ;;
 esac
 
-TAG=$Tainer-$MODE-$STEPS-$BS-$LR-$EPS-$SEED-$STEP_INTERVAL-$RANK
+TAG=$Tainer-$MODE-$STEPS-$BS-$LR-$EPS-$SEED-$STEP_INTERVAL-$RANK_TAG
 
 
 echo $TAG
@@ -59,7 +66,7 @@ echo "SEED: $SEED"
 echo "TRAIN/EVAL STEPS: $STEPS/$EVAL_STEPS"
 echo "MODE: $MODE"
 echo "Extra args: $EXTRA_ARGS $TASK_ARGS"
-echo "RANK: $RANK"
+echo "RANK: ${RANK_SCHEDULE:-$RANK}"
 echo "STEP INTERVAL: $STEP_INTERVAL"
 
 python run_lozo.py \
